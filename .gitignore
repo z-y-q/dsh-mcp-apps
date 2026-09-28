@@ -1,0 +1,5 @@
+node_modules/
+lib/*.map
+*.tgz
+.DS_Store
+package.json.bak-rename-20260928

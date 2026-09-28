@@ -1,0 +1,12 @@
+# dsh-mcp-apps: MCP Apps presentation + live-credential tool bridge.
+#
+# registerTools: also register every connected server's tools on the harness
+# `tools` runtime, backed by this bundle's own connection (authProvider-backed,
+# so tokens are read per request instead of the official row's boot-time
+# snapshot). Tools whose names the official mcp-client row already owns are
+# skipped with a warning — remove that row to let this bridge take over.
+- insert:
+  - id: mcp-apps
+    name: '@z-y-q/dsh-mcp-apps'
+    config:
+      registerTools: true
