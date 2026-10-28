@@ -33,6 +33,7 @@ export class SandboxServer {
   private server: Server | undefined
   private originValue = ''
   private token = ''
+  private key = ''
   private rpcHandler: ((endpoint: string, payload: unknown) => Promise<unknown>) | undefined
 
   /** Resolved origin (`http://127.0.0.1:<port>`), set once `start` succeeds. */
@@ -43,6 +44,13 @@ export class SandboxServer {
   /** The per-boot bearer token RPC callers must present. */
   get rpcToken(): string {
     return this.token
+  }
+
+  /** Per-boot embed key inlined into the sandbox page and carried to the
+   * embedding host page over the authenticated Remote; lets the page validate
+   * its parent when no Referer header arrives (desktop `dsh-app://` origin). */
+  get embedKey(): string {
+    return this.key
   }
 
   /**
@@ -61,6 +69,7 @@ export class SandboxServer {
         this.server = server
         this.originValue = `http://127.0.0.1:${address.port}`
         this.token = randomUUID()
+        this.key = randomUUID() + randomUUID()
         resolve()
       })
     })
@@ -111,7 +120,7 @@ export class SandboxServer {
     res.setHeader('Pragma', 'no-cache')
     res.setHeader('Expires', '0')
     res.setHeader('Content-Type', 'text/html; charset=utf-8')
-    res.end(sandboxPageHtml())
+    res.end(sandboxPageHtml(this.key))
   }
 
   private async serveRpc(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, url: URL): Promise<void> {

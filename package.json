@@ -1,16 +1,28 @@
 {
   "name": "@z-y-q/dsh-mcp-apps",
-  "version": "0.1.1",
+  "version": "0.3.0",
   "description": "MCP Apps display for DeepSeek Harness: renders MCP App UI resources (ui://) inside tool call rows via a separate-origin sandbox.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
+    "./typert": {
+      "types": "./lib/typert.host.d.ts",
+      "default": "./lib/typert.host.js"
+    },
+    "./remote": {
+      "types": "./lib/typert.remote-client.d.ts",
+      "default": "./lib/typert.remote-client.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
+    "lib/typert.host.js",
+    "lib/typert.host.d.ts",
+    "lib/typert.remote-client.js",
+    "lib/typert.remote-client.d.ts",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md"
@@ -22,7 +34,6 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-api-remotes",
         "@deepseek-ai/dsh-client-ui-tool",
         "@deepseek-ai/dsh-client-ui-slots",
@@ -31,7 +42,7 @@
     }
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown -c tsdown.node.config.ts && tsdown -c tsdown.client.config.ts",
     "test": "node --test --test-force-exit test/*.test.mjs test/*.test.ts"
   },
   "dependencies": {
@@ -40,14 +51,13 @@
     "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": ">=0.1.0-rc.0",
-    "@deepseek-ai/dsh-settings": "^0.1.5-rc.2"
+    "@deepseek-ai/cordis": ">=4.0.0 <5.0.0",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.1.7-rc.2 <0.3.0"
   },
   "devDependencies": {
     "tsdown": "^0.22.2",
     "react": "^18.2.0",
-    "@types/react": "~18.3.1",
-    "@deepseek-ai/dsh-settings": "next"
+    "@types/react": "~18.3.1"
   },
   "license": "MIT",
   "engines": {
@@ -56,7 +66,7 @@
   "keywords": [
     "dsh",
     "deepseek-harness",
-    "dsh-v0.1.5-rc.2",
+    "dsh-v0.1.7-rc.2",
     "mcp",
     "dsh-mcp-apps"
   ]

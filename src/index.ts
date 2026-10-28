@@ -2,9 +2,14 @@
  * dsh-mcp-apps host half: opens its own MCP connections to the servers the
  * official `mcp-client` plugin already configures (read-only reuse of their
  * loader-row config), discovers which tools carry `ui://` App resources, serves
- * the separate-origin sandbox proxy page, and exposes a fenced generic RPC
- * channel the browser half calls for the App list, App resources, and
- * server-tool passthrough. The official mcp-client package is never modified.
+ * the separate-origin sandbox proxy page, and exposes a fenced RPC channel the
+ * browser half calls for the App list, App resources, and server-tool
+ * passthrough. The official mcp-client package is never modified.
+ *
+ * RPC rides the Typert Gateway (the `mcp-apps` Remote service from
+ * `./remote.ts`): no token-gated loopback POST handler and no
+ * settings-namespace bootstrap. The sandbox proxy page itself still needs its
+ * own loopback origin — the separate-port security model is unchanged.
  *
  * On-demand login: when the `dsh-mcp-auth` bundle is present its `mcpAuth`
  * service supplies an `authProvider` for each connection, so a protected tool
@@ -17,7 +22,6 @@
  */
 
 import z from '@deepseek-ai/schemastery'
-import * as dshSettings from '@deepseek-ai/dsh-settings'
 import type { Context } from '@deepseek-ai/cordis'
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
 import {
@@ -26,9 +30,12 @@ import {
 } from './connections.ts'
 import { registerServerTools, withLiveCredentials, type ToolsRuntimeLike } from './tool-bridge.ts'
 import { SandboxServer } from './sandbox-server.ts'
+import { McpAppsRemoteService } from './remote.ts'
+
+export * from './remote.ts'
 
 export const name = 'mcp-apps'
-export const inject = ['settings', 'tools']
+export const inject = ['tools']
 
 /**
  * The slice of `dsh-mcp-auth`'s provided service this bundle uses.
@@ -42,12 +49,11 @@ interface McpAuthLike {
   lazyAuth(serverName: string, serverUrl: string, scope?: string): Promise<LazyAuthLike>
 }
 
-const settingsNamespace = (dshSettings as { settingsNamespace?: (name: string) => string }).settingsNamespace
-const NS = settingsNamespace !== undefined ? settingsNamespace('mcp-apps') : 'mcp-apps'
 const EndpointSchema = z.object({
   /** Bootstrap the browser half reads: listener origin + per-boot token. */
   endpointJson: z.string().default(''),
 })
+void EndpointSchema
 
 export const Config = z.object({
   /** Allowlist of mcp-client `serverName` values; empty mirrors every row. */
@@ -251,10 +257,14 @@ export async function apply(ctx: Context, config: z.infer<typeof Config>): Promi
     return fail(new Error(`unknown endpoint ${JSON.stringify(endpoint)}`))
   }
 
-  // RPC rides this bundle's own loopback listener (token-gated); the browser
-  // half learns the origin+token through the authenticated settings namespace
-  // — the same host->browser channel the official settings UI uses.
+  // RPC rides the Typert Gateway: the Remote service below exposes the shared
+  // handler to the browser half (no loopback POST surface, no per-boot token,
+  // no settings-namespace bootstrap). The sandbox listener still serves the
+  // separate-origin proxy page the App iframes load.
   listener.setRpcHandler(async (endpoint, payload) => handler(endpoint, payload))
-  const scope = ctx.settings.register(NS, EndpointSchema)
-  await scope.update({ endpointJson: JSON.stringify({ origin: listener.origin, token: listener.rpcToken }) })
+  new McpAppsRemoteService(ctx, {
+    dispatch: async (endpoint, payload) => handler(endpoint, payload),
+    sandboxOrigin: () => listener.origin,
+    sandboxKey: () => listener.embedKey,
+  })
 }

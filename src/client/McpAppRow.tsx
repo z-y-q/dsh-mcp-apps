@@ -34,6 +34,32 @@ interface ResourceResponse {
   readonly cspJson: string | null
   readonly permissionsJson: string | null
   readonly sandboxOrigin: string
+  readonly sandboxKey: string
+}
+
+/**
+ * Parent-side transport that stamps every outgoing message with the per-boot
+ * sandbox embed key. The sandbox proxy validates it and — where the embedding
+ * page sends no Referer header (the desktop app's `dsh-app://` origin) — pins
+ * the parent origin from the first keyed message instead of the referrer.
+ */
+class KeyedPostMessageTransport extends PostMessageTransport {
+  private readonly embedKey: string
+
+  constructor(embedKey: string, target: Window | undefined, source: MessageEventSource) {
+    super(target, source)
+    this.embedKey = embedKey
+  }
+
+  override send(message: unknown, options?: unknown): Promise<void> {
+    const stamped = message !== null && typeof message === 'object'
+      ? { ...(message as Record<string, unknown>), __sandboxKey: this.embedKey }
+      : message
+    return super.send(
+      stamped as Parameters<PostMessageTransport['send']>[0],
+      options as Parameters<PostMessageTransport['send']>[1],
+    )
+  }
 }
 
 type Envelope<T> = { ok: true; value: T } | { ok: false; error: { message: string } }
@@ -139,7 +165,7 @@ export function McpAppRow(props: McpAppRowProps): ReturnType<typeof createElemen
         })
 
         if (frame.contentWindow === null) return
-        await bridge.connect(new PostMessageTransport(frame.contentWindow, frame.contentWindow))
+        await bridge.connect(new KeyedPostMessageTransport(resource.sandboxKey, frame.contentWindow, frame.contentWindow))
         await bridge.sendSandboxResourceReady({ html: resource.html, csp, permissions })
         await initialized
         if (cancelled) return

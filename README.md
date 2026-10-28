@@ -1,6 +1,12 @@
 # dsh-mcp-apps
 
-> **Requires: dsh v0.1.5-rc.2**（peerDependencies 已精确到 `^0.1.5-rc.2`，装错版本 npm 会拒绝）
+> **Requires: dsh ≥ v0.1.7-rc.2** (compatible with 0.1.7 / 0.2.x, peer range
+> `>=0.1.7-rc.2 <0.3.0`; dsh 0.2.1 gates plugin versions, so use a build from
+> 2026-10-20 or later). This is a **dsh plugin** — install it into a dsh profile
+> and let the dsh host load it; it is not a standalone npm library.
+> **Desktop app (DeepSeek Harness.app) is supported**, including App cards:
+> the sandbox now handshakes on a per-boot embed key because `dsh-app://`
+> pages send no Referer (architecture doc §7.3).
 
 
 MCP Apps display for DeepSeek Harness: renders the `ui://` App resources an MCP
@@ -15,9 +21,14 @@ no `resources/read`.
 
 ## Install
 
-Add the package to your dsh profile and list it in the profile's
-`dsh.profile.bundles`; the bundled `cordis.patch.yml` inserts the `mcp-apps`
-host row automatically.
+Add `"@z-y-q/dsh-mcp-apps": "^0.2.0"` to your profile
+(`~/.dsh/profiles/web/package.json`) `dependencies`, list
+`"@z-y-q/dsh-mcp-apps"` in `dsh.profile.bundles`, and run `pnpm install`
+inside the profile directory. The bundled `cordis.patch.yml` inserts the
+`mcp-apps` host row automatically.
+
+Install `dsh-mcp-auth` (`^0.2.0`) alongside when you need OAuth login
+support — see its README for the mcp-client row configuration.
 
 ## Config
 
@@ -44,7 +55,12 @@ host row automatically.
 - The sandbox proxy validates its embedder by referrer (loopback only) and
   refuses top-level loads; all relayed messages carry origin checks.
 - Tool/resource calls initiated by an App forward through this bundle's host
-  half to its own MCP connection.
+  half to its own MCP connection. As of 0.2.0 that forwarding rides the dsh
+  **Typert Gateway** (the `mcp-apps` Remote namespace: list / resource /
+  call-tool / read-resource / list-resources) — no separate loopback RPC
+  endpoint, per-boot token, or settings-namespace bootstrap remains; the
+  sandbox proxy page itself still lives on its own loopback origin (the
+  security model is unchanged).
 
 ## Reusing an mcp-client row's config (including `!!js`)
 
@@ -158,6 +174,15 @@ new prompt sections or session events, and KV-cache behavior is unchanged.
 
 ```sh
 pnpm install --ignore-workspace
-pnpm run build   # tsdown -> lib/index.js (host) + lib/client.js (browser)
+pnpm run build   # tsdown twice: node half (@Remote decorator lowering) +
+                 # client half; copies the hand-written Typert artifacts
+                 # (typert.host / typert.remote-client) into lib/
 pnpm test        # node --test --test-force-exit test/*.test.mjs test/*.test.ts
 ```
+
+> The Typert artifacts are **hand-maintained** (`src/typert.host.manual.js` /
+> `typert.remote-client.manual.js`): the official generator's package mode only
+> recognizes workspace-internal packages. When adding or changing an `@Remote`
+> method, update both files (and set the `implementation` field whenever the
+> wire name differs from the JS method name). For a minimal e2e check run
+> `node test/e2e-demo-server.mjs` (a ui:// App demo on port 3927).

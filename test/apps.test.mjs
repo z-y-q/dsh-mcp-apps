@@ -45,11 +45,14 @@ test('buildCspHeader locks down frame/object/base-uri by default', () => {
 })
 
 test('sandbox page is self-contained and carries the relay', () => {
-  const html = sandboxPageHtml()
+  const html = sandboxPageHtml('test-embed-key')
   assert.doesNotMatch(html, /<script[^>]+src=/)
   assert.match(html, /sandbox-resource-ready/)
   assert.match(html, /sandbox-proxy-ready/)
   assert.match(html, /allow-scripts allow-same-origin allow-forms/)
+  // The per-boot embed key is inlined for the no-referrer (desktop) handshake.
+  assert.match(html, /"test-embed-key"/)
+  assert.match(html, /__sandboxKey/)
 })
 
 test('sandbox server serves only sandbox.html with CSP headers', async () => {
@@ -68,68 +71,41 @@ test('sandbox server serves only sandbox.html with CSP headers', async () => {
 test('built host half exports the plugin shape', async () => {
   const plugin = await import('../lib/index.js')
   assert.equal(plugin.name, 'mcp-apps')
-  // 'tools' joined 'settings' with the tool-registration bridge: the harness
-  // tools runtime is what the bridge registers definitions on.
-  assert.deepEqual(plugin.inject, ['settings', 'tools'])
+  // Only the harness tools runtime is a hard inject: optional collaborators
+  // (settings, mcpAuth) are resolved through ctx.get at apply time.
+  assert.deepEqual(plugin.inject, ['tools'])
   assert.equal(typeof plugin.apply, 'function')
   assert.equal(typeof plugin.Config, 'function')
 })
 
-test('host apply publishes endpoint bootstrap and serves token-gated RPC', async () => {
-  const plugin = await import('../lib/index.js')
-  const resolved = plugin.Config({})
-  let endpointInfo = null
-  const effects = []
-  const ctx = {
-    logger: { warn: () => {} },
-    // Optional collaborators are resolved through the reflection layer; a stub
-    // that omits `get` is not the real Context and would fail apply().
-    get: () => undefined,
-    loader: { entries: () => [] },
-    // The harness tools runtime is a hard inject of this bundle; the stub
-    // records registrations so tests can assert the bridge's behaviour.
-    tools: (() => {
-      const registered = new Map()
-      return {
-        registered,
-        register: (definition) => { registered.set(definition.name, definition); return () => registered.delete(definition.name) },
-      }
-    })(),
-    settings: {
-      register: (ns, schema) => ({
-        get: () => schema({}),
-        update: async (patch) => {
-          const parsed = JSON.parse(patch.endpointJson)
-          endpointInfo = parsed
-        },
-      }),
-    },
-    effect: (setup) => { effects.push(setup()); return () => {} },
-  }
-  await plugin.apply(ctx, resolved)
-  assert.notEqual(endpointInfo, null)
-  assert.match(endpointInfo.origin, /^http:\/\/127\.0\.0\.1:\d+$/)
-  assert.equal(typeof endpointInfo.token, 'string')
-
-  const call = async (endpoint, payload) => {
-    const response = await fetch(`${endpointInfo.origin}/rpc/${endpoint}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${endpointInfo.token}` },
-      body: JSON.stringify(payload ?? {}),
-    })
-    return response.json()
-  }
-  const list = await call('list', {})
-  assert.equal(list.ok, true)
-  assert.deepEqual(list.value.apps, [])
-  assert.equal(list.value.sandboxOrigin, endpointInfo.origin)
-  const unknown = await call('nope', {})
-  assert.equal(unknown.ok, false)
-  const wrongToken = await fetch(`${endpointInfo.origin}/rpc/list`, {
+test('sandbox listener serves token-gated RPC with a per-boot embed key', async () => {
+  const server = new SandboxServer()
+  server.setRpcHandler(async (endpoint) => ({ ok: true, value: { endpoint } }))
+  await server.start(0)
+  assert.match(server.origin, /^http:\/\/127\.0\.0\.1:\d+$/)
+  assert.equal(typeof server.rpcToken, 'string')
+  assert.equal(typeof server.embedKey, 'string')
+  assert.notEqual(server.embedKey, '')
+  // The embed key is inlined into the served page (no-referrer handshake).
+  const page = await fetch(`${server.origin}/sandbox.html`)
+  assert.match(await page.text(), new RegExp(server.embedKey))
+  // RPC without the per-boot bearer is refused.
+  const anon = await fetch(`${server.origin}/rpc/list`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  })
+  assert.equal(anon.status, 401)
+  const authed = await fetch(`${server.origin}/rpc/list`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${server.rpcToken}` },
+    body: '{}',
+  })
+  assert.equal(authed.status, 200)
+  assert.equal((await authed.json()).ok, true)
+  const wrongToken = await fetch(`${server.origin}/rpc/list`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer wrong' },
     body: '{}',
   })
   assert.equal(wrongToken.status, 401)
-  for (const dispose of effects) if (typeof dispose === 'function') dispose()
+  server.stop()
 })

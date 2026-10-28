@@ -1,6 +1,10 @@
 # dsh-mcp-apps
 
-> **Requires: dsh v0.1.5-rc.2**（peerDependencies 已精确到 `^0.1.5-rc.2`，装错版本 npm 会拒绝）
+> **Requires: dsh ≥ v0.1.7-rc.2**（兼容 0.1.7 / 0.2.x，peer 区间
+> `>=0.1.7-rc.2 <0.3.0`；dsh 0.2.1 起有插件版本门禁，需本包 2026-10-20 后版本）。
+> 本包是 **dsh 插件**，须装进 dsh profile 由 dsh 宿主加载使用，不是独立 npm 库。
+> **桌面端（DeepSeek Harness.app）已支持**：含 App 卡片渲染（沙箱 embedKey
+> 握手适配 `dsh-app://` 无 Referer 场景，架构文档 §7.3）。
 
 
 为 DeepSeek Harness 提供 MCP Apps 展示：把 MCP 服务器附加在工具上的 `ui://`
@@ -14,8 +18,13 @@ loader 里的服务器配置，并自行建立 MCP 连接——因为官方插�
 
 ## 安装
 
-把本包加入 dsh profile 并列入 profile 的 `dsh.profile.bundles`；包内
+在 profile（`~/.dsh/profiles/web/package.json`）的 `dependencies` 中添加
+`"@z-y-q/dsh-mcp-apps": "^0.2.0"`，并把 `"@z-y-q/dsh-mcp-apps"` 列入
+`dsh.profile.bundles`，然后在 profile 目录 `pnpm install`。包内
 `cordis.patch.yml` 会自动插入 `mcp-apps` 宿主行。
+
+需要 OAuth 登录能力时同装 `dsh-mcp-auth`（`^0.2.0`）——两者配合时请看
+dsh-mcp-auth README 的 mcp-client 行配置示例。
 
 ## 配置
 
@@ -38,7 +47,11 @@ loader 里的服务器配置，并自行建立 MCP 连接——因为官方插�
   含 `;`、引号、空格或换行的域名条目会被拒绝。
 - 沙箱代理通过 referrer 校验嵌入方（仅回环），拒绝顶层加载；所有转发的
   消息都带来源校验。
-- App 发起的工具/资源调用经本 bundle 宿主侧转发到自己的 MCP 连接。
+- App 发起的工具/资源调用经本 bundle 宿主侧转发到自己的 MCP 连接。0.2.0 起
+  转发通道走 dsh **Typert Gateway**（`mcp-apps` Remote 命名空间：list /
+  resource / call-tool / read-resource / list-resources）——不再有独立的
+  loopback RPC 端点、per-boot token 与 settings 命名空间引导；沙箱代理页
+  本身仍在独立回环源上（安全模型不变）。
 
 ## 复用 mcp-client 行的配置（含 `!!js`）
 
@@ -129,9 +142,15 @@ MCP Apps 参考宿主有一条约定：App 里调用受保护工具时，服务�
 
 ```sh
 pnpm install --ignore-workspace
-pnpm run build   # tsdown -> lib/index.js（宿主）+ lib/client.js（浏览器）
+pnpm run build   # tsdown 两遍：node 半边（含 @Remote 装饰器降级）+ client 半边
+                 # 并把手写 Typert 工件（typert.host / typert.remote-client）拷入 lib/
 pnpm test        # node --test --test-force-exit test/*.test.mjs test/*.test.ts
 ```
 
+> Typert 工件为**手写维护**（`src/typert.host.manual.js` / `typert.remote-client.manual.js`）：
+> 官方 generator 的 package 模式只认 workspace 内的包。新增/修改 `@Remote` 方法时
+> 需同步改这两个文件（wire 名 ≠ JS 方法名时必须写 `implementation` 字段）。
+> e2e 最小验证：`node test/e2e-demo-server.mjs`（3927 端口的 ui:// App demo）。
+>
 > `node --test test/` 会把 `test/` 目录本身当模块加载而报 `MODULE_NOT_FOUND`，
 > 所以显式列出用例文件。

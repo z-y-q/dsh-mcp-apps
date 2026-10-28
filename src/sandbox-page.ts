@@ -15,21 +15,29 @@
 
 const PROXY_SCRIPT = String.raw`
 'use strict';
-// Loopback-only embedding: the referrer is the dsh host page.
+// Loopback-only embedding: with a Referer header the dsh host page is pinned
+// from it; without one (the desktop app serves the GUI from the custom
+// dsh-app:// scheme, which sends no Referer) the origin is pinned from the
+// FIRST parent message carrying the per-boot embed key inlined below. The key
+// rides only the authenticated host RPC, so a foreign embedder cannot forge it.
 var ALLOWED_REFERRER_PATTERN = /^http:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/;
+var EMBED_KEY = __SANDBOX_EMBED_KEY__;
 
 if (window.self === window.top) {
   throw new Error('This file is only to be used in an iframe sandbox.');
 }
-if (!document.referrer) {
-  throw new Error('No referrer, cannot validate embedding site.');
+var EXPECTED_HOST_ORIGIN = null;
+if (document.referrer) {
+  if (!document.referrer.match(ALLOWED_REFERRER_PATTERN)) {
+    throw new Error('Embedding domain not allowed in referrer ' + document.referrer + '.');
+  }
+  EXPECTED_HOST_ORIGIN = new URL(document.referrer).origin;
 }
-if (!document.referrer.match(ALLOWED_REFERRER_PATTERN)) {
-  throw new Error('Embedding domain not allowed in referrer ' + document.referrer + '.');
+// Origin to address the parent by: the pinned origin once known, '*' while the
+// no-referrer path has not yet seen the first keyed parent message.
+function hostOrigin() {
+  return EXPECTED_HOST_ORIGIN === null ? '*' : EXPECTED_HOST_ORIGIN;
 }
-
-// The origin every parent message must come from.
-var EXPECTED_HOST_ORIGIN = new URL(document.referrer).origin;
 var OWN_ORIGIN = new URL(window.location.href).origin;
 
 // Security self-test: window.top MUST be unreachable — if it is accessible,
@@ -67,12 +75,25 @@ var PROXY_READY_NOTIFICATION = 'ui/notifications/sandbox-proxy-ready';
 // HTTP response headers set by the host from the ?csp= query param.
 window.addEventListener('message', function (event) {
   if (event.source === window.parent) {
-    if (event.origin !== EXPECTED_HOST_ORIGIN) {
+    var data = event.data;
+    // Every parent message must carry the per-boot embed key. With no referrer
+    // the first valid message also pins the parent origin; afterwards the
+    // origin must stay the same.
+    if (data === null || typeof data !== 'object' || data.__sandboxKey !== EMBED_KEY) {
+      console.error('[Sandbox] Rejecting parent message without a valid sandbox key.');
+      return;
+    }
+    if (EXPECTED_HOST_ORIGIN === null) {
+      EXPECTED_HOST_ORIGIN = event.origin;
+    } else if (event.origin !== EXPECTED_HOST_ORIGIN) {
       console.error('[Sandbox] Rejecting message from unexpected origin:', event.origin, 'expected:', EXPECTED_HOST_ORIGIN);
       return;
     }
-    if (event.data && event.data.method === RESOURCE_READY_NOTIFICATION) {
-      var params = event.data.params || {};
+    // Strip the transport key before anything reaches the inner App frame.
+    var outgoing = { ...data };
+    delete outgoing.__sandboxKey;
+    if (outgoing.method === RESOURCE_READY_NOTIFICATION) {
+      var params = outgoing.params || {};
       if (typeof params.sandbox === 'string') {
         inner.setAttribute('sandbox', params.sandbox);
       }
@@ -91,14 +112,14 @@ window.addEventListener('message', function (event) {
         }
       }
     } else if (inner.contentWindow) {
-      inner.contentWindow.postMessage(event.data, '*');
+      inner.contentWindow.postMessage(outgoing, '*');
     }
   } else if (event.source === inner.contentWindow) {
     if (event.origin !== OWN_ORIGIN) {
       console.error('[Sandbox] Rejecting message from inner iframe with unexpected origin:', event.origin, 'expected:', OWN_ORIGIN);
       return;
     }
-    window.parent.postMessage(event.data, EXPECTED_HOST_ORIGIN);
+    window.parent.postMessage(event.data, hostOrigin());
   }
 });
 
@@ -106,15 +127,17 @@ window.parent.postMessage({
   jsonrpc: '2.0',
   method: PROXY_READY_NOTIFICATION,
   params: {},
-}, EXPECTED_HOST_ORIGIN);
+}, hostOrigin());
 `
 
 /**
  * The sandbox proxy document. CSP arrives via the HTTP response header, never
- * from this markup.
+ * from this markup. The per-boot embed key is inlined into the script so the
+ * page can validate parent messages without a Referer header (desktop app).
+ * @param embedKey - random per-boot key the embedding host page must present.
  * @returns the full `text/html` document string.
  */
-export function sandboxPageHtml(): string {
+export function sandboxPageHtml(embedKey: string): string {
   return `<!doctype html>
 <html>
   <head>
@@ -129,7 +152,7 @@ export function sandboxPageHtml(): string {
     </style>
   </head>
   <body>
-    <script>${PROXY_SCRIPT}</script>
+    <script>${PROXY_SCRIPT.replace('__SANDBOX_EMBED_KEY__', JSON.stringify(embedKey))}</script>
   </body>
 </html>
 `
