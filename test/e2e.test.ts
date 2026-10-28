@@ -74,6 +74,8 @@ test('end to end: mcp server -> host discovery -> token RPC -> sandbox -> client
     // Optional collaborators come from the reflection layer; the real Context
     // has `get`, so the stub must too (no auth bundle in this fixture).
     get: () => undefined,
+    // cordis Service 构造会向 ctx.reflect.provide 注册自身(Real Context 同款)
+    reflect: { provide: () => () => {} },
     // Hard inject of this bundle: record registrations (registerTools defaults
     // to false, so none are expected in this fixture).
     tools: { registered: new Map(), register: (definition: { name: string }) => { throw new Error('registerTools should be off by default') } },
